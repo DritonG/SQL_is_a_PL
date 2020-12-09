@@ -13,11 +13,16 @@
 DROP TABLE  dfa_nodes;
 DROP TABLE  dfa_edges;
 
+-- create the nodes table where the nodes represent a state of the automata(dfa)
+-- where 'stateID' is the identifier for the individual an state
+-- and 'letter' includes the value at this state, a-z, A-Z
 CREATE TABLE dfa_nodes
 (   stateID INTEGER PRIMARY KEY,                                                                -- node identifier
     letter  CHAR(1)                                                                             -- letter from alphabet
 );
-
+-- edges table, declare transition possibilities between states(nodes)
+-- every single row represents an edge between the nodes.
+-- 'stateID's are coded in dfa_a and dfa_b
 CREATE TABLE dfa_edges
 (   dfa_a INTEGER NOT NULL REFERENCES dfa_nodes(stateID) ON UPDATE CASCADE ON DELETE CASCADE,   -- edge from note a to b
     dfa_b INTEGER NOT NULL REFERENCES dfa_nodes(stateID) ON UPDATE CASCADE ON DELETE CASCADE,   -- edge from node b to a
@@ -26,7 +31,7 @@ CREATE TABLE dfa_edges
 CREATE INDEX dfa_a_idx ON dfa_edges (dfa_a);
 CREATE INDEX dfa_b_idx ON dfa_edges (dfa_b);
 
--- Inserting the values for the deterministic finite automata represented as a graph in 2 tables nodes+ edges
+-- Inserting the values for the deterministic finite automata represented as a graph in 2 tables nodes and edges
 INSERT INTO
     dfa_nodes(stateID, letter)
 VALUES
