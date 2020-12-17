@@ -36,35 +36,56 @@ CREATE TABLE transitions
 CREATE INDEX s_a_idx ON transitions (s_a);
 CREATE INDEX s_b_idx ON transitions (s_b);
 
--- Inserting the values for the deterministic finite automata
--- Tuple-S: {1 , 2, 3, 4, 5, 6}; 6 States + the NULL states which indicates a starting node(state)
--- Tuple-A: {F, o, t, o, P, h}; Alphabet with 6 letters.
+-- Inserting the values for the Deterministic Finite Automata (DFA). We use a Single-Entry, Single-Exit(SESE)-graph
+-- where the connections to the entry and exit nodes indicates start(entry) and end(exit) nodes respectively.
+-- Tuple-S: {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}; 11 States + the two entry and exit states
+-- Tuple-A: {F, o, t, o, P, h, g, r, a, f, p}; Alphabet with 11 letters.
 INSERT INTO
     states(stateID, letter)
 VALUES
 -- reference node to declare starting states, every node which is connected to this node is a starting state
-    (0, NULL),
+    (0, NULL), -- TODO: !TEST NECESSARY! if 'NULL' as value for start states is a problem during the process
     (1,'F'), -- start state
     (2,'o'),
     (3,'t'),
     (4,'o'), -- end state
     (5,'P'), -- start state
-    (6,'h')
+    (6,'h'),
+    (7,'g'),
+    (8,'r'),
+    (9,'a'),
+    (10,'f'),
+    (11,'p'),
+    (12,'h'), -- end state
+    (42, NULL) -- TODO: !TEST NECESSARY! if 'NULL' as value for end states is a problem during the process
 RETURNING *;
 
--- Inserting the values for the Deterministic Finite Automaton(DFA)
--- Tuple-S: {1 , 2, 3, 4, 5, 6}; 6 States + the NULL states which indicates a starting node(state)
--- Tuple-A: {F, o, t, o, P, h}; Alphabet with 6 letters.
+-- Inserting the connections (edges) of the DFA which encodes 'T', 's_0' and 'F'
+-- Tuple-T: {(0, 1), (0, 5), (1, 2), (2, 3), (3, 4), (4, 42), (4, 7), (5, 6), (6, 2), (6, 42), (7, 8), (8, 9), (9, 10),
+-- (10, 42), (9, 11), (11, 6)}
+-- Tuple-s_0: {1, 5}; states which predecessor is the node with stateID = 0 are start states(nodes)
+-- Tuple-F: {4, 6, 10}; states which successor is the node with stateID = 42 are end states(nodes)
+-- End
 INSERT INTO
     transitions(s_a, s_b)
 VALUES
-    (0, 1), -- edge to start node with stateID 1 and letter "F"
-    (0, 5), -- edge to start node with stateID 5 and letter "P"
+    (0, 1), -- edge to start node with stateID 1 and letter "F" --> predecessor 0
+    (0, 5), -- edge to start node with stateID 5 and letter "P" --> predecessor 0
     (1, 2),
     (2, 3),
     (3, 4), -- edge to end node with stateID 4 and letter "o"
+    (4, 42), --´edge which indicates 4 to be a end state(node) --> successor 42
+    (4, 7), --´edge which indicates 4 to be a end state(node)
     (5, 6),
-    (6, 2)
+    (6, 2),
+    --(6, 42), -- (6,'h') = endstate --> successor = 42
+    (7, 8),
+    (8, 9),
+    (9, 10),
+    (10, 42), -- (10, 'f') = endstate --> successor = 42
+    (9, 11),
+    (11, 12),
+    (12, 42)
 RETURNING *;
 
 
@@ -73,17 +94,35 @@ SELECT *
     FROM  states s
     LEFT JOIN transitions t on s.stateID = t.s_b
 WHERE  t.s_a = 0;
-
--- Tuple-F: list all end/finite acceptable states(nodes)
+-- Tuple-F: list all end states(nodes)
 SELECT *
-FROM   states s
-WHERE  NOT EXISTS (
-   SELECT  -- SELECT list mostly irrelevant; can just be empty in Postgres
-   FROM   transitions t
-   WHERE  t.s_a = s.stateID
-   );
+    FROM  states s
+    LEFT JOIN transitions t on s.stateID = t.s_a
+WHERE  t.s_b = 42;
 
-
+-- query to get ALL valid 'words', their 'path_string' and 'distance' within the DFA.
+WITH RECURSIVE query(b, path_string, distance, word) AS (
+  SELECT
+         s_b,                               -- sb = the successor
+         s_a ||'-'|| s_b AS path_string,    -- concatinating the first state with its successor
+         0 AS distance
+        ,''||'' AS  word
+  FROM
+       states, transitions
+  WHERE s_a = 0 -- constraints that a start state(node) has to have an edge on node 0
+  UNION
+        SELECT
+               t.s_b,
+               q.path_string || '-' || t.s_b AS path_string,
+               q.distance + 1 AS distance
+            ,  q.word || s.letter AS word
+        FROM states AS s, transitions AS t
+            JOIN query AS q
+                ON t.s_a = q.b -- recursively checking what the next successor of q.b is, given q.b as predecessor.
+        WHERE q.b = s.stateID
+) SELECT word, path_string, distance FROM query
+WHERE query.b = 42  -- constraining the end of a word to be at 42
+ORDER BY distance;
 
 
 ------------------------------------------------------------------------------------------------------------------------
@@ -96,35 +135,43 @@ SELECT *
   FROM states s
   LEFT JOIN transitions t ON s.stateID = t.s_b
  WHERE t.s_a = 0;
-
+-- all
 SELECT * FROM states WHERE stateID IN (
-  SELECT s_a FROM transitions WHERE s_b = 1
+  SELECT s_a FROM transitions WHERE s_b = 42
   UNION ALL
   SELECT s_b FROM transitions WHERE s_a = 0
 );
 
 WITH RECURSIVE query(a, b, path_string, distance) AS (
   SELECT
-         s_a,
-         s_b,
-         s_a ||''|| s_b AS path_string,
+         t.s_a,
+         t.s_b,
+         t.s_a ||''|| t.s_b AS path_string,
          1 AS distance
- --      ,  letter || '' AS  word
+      ,  s.letter || '' AS  word
   FROM
        states AS s, transitions AS t
-  WHERE s_a = 0
+  -- declare initial state -> 0 where the start states(1 and 5) are connected to
+  WHERE stateID IN (
+  SELECT s_a FROM transitions WHERE s_b = 42
+  UNION ALL
+  SELECT s_b FROM transitions WHERE s_a = 0
+)
   UNION
         SELECT
                q.a,
                t.s_b,
                q.path_string || '' || t.s_b AS path_string,
                q.distance + 1 AS distance
---             ,  q.word || s.letter AS word
+            ,  q.word || s.letter AS word
         FROM states AS s, transitions AS t
             JOIN query AS q
                 ON t.s_a = q.b
+        WHERE ("left"(q.path_string, 1) = '0' AND
+                        "right"(q.path_string, 2) = '42')
 ) SELECT * FROM query
-WHERE right(query.path_string, 1) = '4' -- abfrage wenn der pathstring mit dem finite state 4 endet
+--WHERE right(query.path_string, 1) = '42'-- constraining output on finite state 4 (letter = "o").
+--WHERE query.word = 'Foto'--("left"('Foto', 1)  OR  query.word = 'Photo')
 ORDER BY distance;
 
 WITH RECURSIVE query(a, b, path_string, distance, word) AS (
@@ -136,7 +183,7 @@ WITH RECURSIVE query(a, b, path_string, distance, word) AS (
         ,letter || '' AS  word
   FROM
        states AS s, transitions AS t
-  WHERE s_a = 0 -- constraints that a start state(node) has to have an edge on node 0
+  --WHERE s_a = 0 -- constraints that a start state(node) has to have an edge on node 0
   UNION
         SELECT
                q.a,
@@ -148,48 +195,12 @@ WITH RECURSIVE query(a, b, path_string, distance, word) AS (
             JOIN query AS q
                 ON t.s_a = q.b
 ) SELECT * FROM query
-WHERE query.b = 4 AND (query.word = 'Foto' OR  query.word = 'Photo')-- abfrage wenn der pathstring mit dem finite state 4 endet
+WHERE query.b = 4 AND (query.word = 'Foto' OR  query.word = 'Photo')-- checking if "Foto" and "Photo" is generated by the recursive query
+-- WHERE query.word = 'Foto' OR query.word = 'Photo'
 ORDER BY distance;
 
-
-WITH RECURSIVE t(x) AS (
-  SELECT 1 AS x
-
-  UNION ALL
-
-  SELECT x + 1
-  FROM   t
-  WHERE  x < 10
-
-) SELECT * FROM t;
-
-
--- query for all words ending with "o"
-WITH RECURSIVE transitive_closure(a, b, distance, path_string, word) AS
-( SELECT s_a, s_b, 1 AS distance,
-    s_a || '->' || s_b || '.' AS path_string,
-    letter AS word
-  FROM  states, transitions
-
-  UNION
-
-  SELECT tc.a, t.s_b, tc.distance + 1,
-  tc.path_string || t.s_b || '->' AS path_string,
-  tc.word || s.letter AS word
-  FROM states AS s, transitions AS t
-    JOIN transitive_closure AS tc
-      ON t.s_a = tc.b
-  WHERE  NOT EXISTS (
-   SELECT  -- SELECT list mostly irrelevant; can just be empty in Postgres
-   FROM   transitions t
-   WHERE  t.s_a = s.stateID
-   )
-)
-SELECT * FROM transitive_closure
-ORDER BY a, b, distance;
-
 WITH RECURSIVE transitive_closure(actual_string) AS
-( SELECT letter AS actual_string
+( SELECT letter ||'' AS actual_string
   FROM states
 
   UNION
@@ -201,3 +212,29 @@ WITH RECURSIVE transitive_closure(actual_string) AS
   WHERE tc.actual_string NOT LIKE '%' || n.letter || '.%'
 )
 SELECT * FROM transitive_closure;
+
+
+-- Tuple-F: list all end/finite acceptable states(nodes)
+SELECT *
+FROM   states s
+WHERE  NOT EXISTS (
+   SELECT  -- SELECT list mostly irrelevant; can just be empty in Postgres
+   FROM   transitions t
+   WHERE  t.s_a = s.stateID
+   );
+
+
+WITH RECURSIVE t(x) AS (
+  (SELECT 1 AS x
+
+  UNION
+
+  SELECT 1 AS x)
+
+  UNION ALL
+
+  SELECT x + 1
+  FROM   t
+  WHERE  x < 10
+
+) SELECT * FROM t;
