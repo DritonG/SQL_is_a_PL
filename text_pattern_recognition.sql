@@ -56,8 +56,10 @@ VALUES
     (9,'a'),
     (10,'f'),
     (11,'p'),
-    (12,'h'), -- end state
-    (42, NULL) -- TODO: !TEST NECESSARY! if 'NULL' as value for end states is a problem during the process
+    (12,'h'),
+    (13,'i'),
+    (14,'e')
+    ,(42, NULL) -- TODO: !TEST NECESSARY! if 'NULL' as value for end states is a problem during the process
 RETURNING *;
 
 -- Inserting the connections (edges) of the DFA which encodes 'T', 's_0' and 'F'
@@ -82,10 +84,14 @@ VALUES
     (7, 8),
     (8, 9),
     (9, 10),
-    (10, 42), -- (10, 'f') = endstate --> successor = 42
     (9, 11),
+    (10, 42), -- (10, 'f') = endstate --> successor = 42
+    (10, 13),
     (11, 12),
-    (12, 42)
+    (12, 42),
+    (12, 13),
+    (13, 14),
+    (14, 42)
 RETURNING *;
 
 
@@ -120,6 +126,31 @@ WITH RECURSIVE query(b, path_string, distance, word) AS (
             JOIN query AS q
                 ON t.s_a = q.b -- recursively checking what the next successor of q.b is, given q.b as predecessor.
         WHERE q.b = s.stateID
+) SELECT word, path_string, distance FROM query
+WHERE query.b = 42  -- constraining the end of a word to be at 42
+ORDER BY distance;
+
+-- query to get ALL valid 'words', their 'path_string' and 'distance' within the DFA.
+WITH RECURSIVE query(b, path_string, distance, word) AS (
+  SELECT
+         s_b,                               -- sb = the successor
+         s_a ||'-'|| s_b AS path_string,    -- concatinating the first state with its successor
+         0 AS distance
+        ,''||'' AS  word
+  FROM
+       states, transitions
+  WHERE s_a = 0 -- constraints that a start state(node) has to have an edge on node 0
+  UNION
+        SELECT
+               t.s_b,
+               q.path_string || '-' || t.s_b AS path_string,
+               q.distance + 1 AS distance
+            ,  q.word || s.letter AS word
+        FROM states AS s, transitions AS t
+            JOIN query AS q
+                ON t.s_a = q.b -- recursively checking what the next successor of q.b is, given q.b as predecessor.
+        WHERE q.b = s.stateID
+        --WHERE distance < 5
 ) SELECT word, path_string, distance FROM query
 WHERE query.b = 42  -- constraining the end of a word to be at 42
 ORDER BY distance;
